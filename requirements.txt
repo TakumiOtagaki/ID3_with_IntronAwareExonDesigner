@@ -8,3 +8,4 @@ seaborn>=0.11.0
 tqdm>=4.62.0
 scikit-learn>=0.24.0
 scipy>=1.7.0
+ViennaRNA>=2.5.0
