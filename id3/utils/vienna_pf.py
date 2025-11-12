@@ -64,20 +64,22 @@ def compute_intron_losses(
     full_sequence: str,
     window_ranges: List[Tuple[int, int]],
     boundary_indices: List[int]
-) -> Tuple[float, float]:
+) -> Tuple[float, float, List[float]]:
     """
     Compute structural losses: (-EFE) for intron windows and summed boundary BPP.
 
     Returns:
-        (window_efe_loss, boundary_probability_loss)
+        (window_efe_loss, boundary_probability_loss, raw_window_efe_values)
     """
     efe_loss = 0.0
     sanitized = vienna._sanitize_sequence(full_sequence)
+    raw_efes: List[float] = []
     for start, end in window_ranges:
         window_seq = sanitized[start:end]
         if not window_seq:
             continue
         efe = vienna.ensemble_free_energy(window_seq)
+        raw_efes.append(efe)
         efe_loss += -efe  # maximize EFE → minimize -EFE
 
     if boundary_indices:
@@ -86,4 +88,4 @@ def compute_intron_losses(
     else:
         boundary_loss = 0.0
 
-    return efe_loss, boundary_loss
+    return efe_loss, boundary_loss, raw_efes
