@@ -146,6 +146,16 @@ def run_intron_structural_optimization(args):
     )
     boundary_indices = intron_context.get_boundary_indices(flank=args.boundary_flank)
 
+    # Baseline metrics on initial input sequence (for delta reporting)
+    original_exon_baseline = intron_context.get_exon_sequence()
+    initial_full_sequence = intron_context.build_full_sequence(original_exon_baseline, uppercase=True)
+    baseline_efe_loss, baseline_boundary_loss, baseline_raw_efes = compute_intron_losses(
+        vienna=vienna,
+        full_sequence=initial_full_sequence,
+        window_ranges=window_ranges,
+        boundary_indices=boundary_indices
+    )
+
     print("\n" + "-"*70)
     print("Configuration")
     print("-"*70)
@@ -196,9 +206,9 @@ def run_intron_structural_optimization(args):
     pbar = tqdm(range(args.iterations), desc="Optimizing", ncols=100)
     for iteration in pbar:
         optimizer.zero_grad()
-
         result = constraint.forward(alpha=alpha, beta=beta)
         discrete_seq = result['discrete_sequence']
+        rna_probs_current = result['rna_sequence']  # [len, 4] or [1, len, 4]
         base_device = constraint.theta.device if hasattr(constraint, 'theta') else torch.device(args.device)
         constraint_loss = result.get(
             'constraint_penalty',
@@ -232,7 +242,12 @@ def run_intron_structural_optimization(args):
         history['efe_loss'].append(efe_loss)
         history['raw_efe'].append(raw_efes)
         history['boundary'].append(boundary_loss)
-        history['rna_sequences'].append(result['rna_sequence'].detach().cpu().numpy().tolist())
+        # Store current soft probabilities for potential sampling later
+        if rna_probs_current.dim() == 2:
+            rna_probs_store = rna_probs_current.detach().cpu().numpy().tolist()
+        else:
+            rna_probs_store = rna_probs_current.squeeze(0).detach().cpu().numpy().tolist()
+        history['rna_sequences'].append(rna_probs_store)
         history['discrete_sequences'].append(discrete_seq)
 
         pbar.set_postfix({
@@ -260,6 +275,13 @@ def run_intron_structural_optimization(args):
 
     final_full = intron_context.build_full_sequence(best_seq, uppercase=True)
 
+    # Retrieve a deterministic final probability profile for sampling (alpha=0, beta=0)
+    final_vis = constraint.forward(alpha=0.0, beta=0.0)
+    final_probs = final_vis['rna_sequence']
+    if final_probs.dim() == 2:
+        final_probs = final_probs.unsqueeze(0)
+    # final_probs: [1, len, 4] over exon only; need to extract only exon positions later
+
     # Compute mutation list between original exon and optimized exon (RNA space)
     original_exon = intron_context.get_exon_sequence()
     mutations = []
@@ -283,6 +305,32 @@ def run_intron_structural_optimization(args):
     else:
         print("Warning: exon length mismatch when computing mutations; skipping list.")
 
+    # Save loss curves figure for intron optimization
+    loss_png_path = None
+    try:
+        import matplotlib.pyplot as _plt
+        from pathlib import Path as _Path
+        base_dir = _Path(args.structure_output).parent if args.structure_output else _Path("outputs")
+        base_dir.mkdir(parents=True, exist_ok=True)
+        loss_png = base_dir / "intron_loss_curve.png"
+        xs = list(range(len(history['total_loss'])))
+        _plt.figure(figsize=(8, 5))
+        _plt.plot(xs, history['total_loss'], label='total')
+        _plt.plot(xs, history['efe_loss'], label='window_-EFE')
+        _plt.plot(xs, history['boundary'], label='boundary_sum')
+        _plt.plot(xs, history['constraint'], label='constraint')
+        _plt.xlabel('iteration')
+        _plt.ylabel('loss')
+        _plt.title('Intron structural optimization - loss trajectory')
+        _plt.legend()
+        _plt.tight_layout()
+        _plt.savefig(loss_png)
+        _plt.close()
+        loss_png_path = str(loss_png)
+        print(f"Saved intron loss curve to: {loss_png}")
+    except Exception as _e:
+        print(f"Warning: failed to save intron loss curve: {_e}")
+
     print("\n" + "-"*70)
     print("Optimization Summary")
     print("-"*70)
@@ -295,6 +343,13 @@ def run_intron_structural_optimization(args):
     else:
         print(f"  - Window -EFE: {best_metrics['efe_loss']:.4f}")
     print(f"  - Boundary sum (lower better): {best_metrics['boundary']:.4f}")
+    # Baseline and delta reporting
+    init_raw_avg = (sum(baseline_raw_efes) / len(baseline_raw_efes)) if baseline_raw_efes else 0.0
+    print(f"  - Initial window -EFE: {baseline_efe_loss:.4f} | raw avg {init_raw_avg:.4f}")
+    print(f"  - Δ window -EFE (best - init, lower better): {best_metrics['efe_loss'] - baseline_efe_loss:+.4f}")
+    print(f"  - Δ raw EFE avg (best - init, higher better): { (avg_raw - init_raw_avg) if best_metrics['raw_efe'] else 0.0:+.4f}")
+    print(f"  - Initial boundary sum: {baseline_boundary_loss:.4f}")
+    print(f"  - Δ boundary sum (best - init, lower better): {best_metrics['boundary'] - baseline_boundary_loss:+.4f}")
     # Output in DNA alphabet (ATGC) for intron mode only
     best_exon_dna = _rna_to_dna(best_seq)
     final_full_dna = _rna_to_dna(final_full)
@@ -349,6 +404,97 @@ def run_intron_structural_optimization(args):
             print(f"Saved mutation list to: {mut_path}")
         except Exception as e:
             print(f"Warning: failed to save mutation list TSV: {e}")
+
+        # Optionally sample sequences from final probability profile and write multi-FASTA of main only
+        try:
+            sample_n = int(getattr(args, 'sample_count', 0) or 0)
+        except Exception:
+            sample_n = 0
+        if sample_n > 0:
+            import numpy as _np
+            # Extract exon-only probability slices from final_probs
+            final_probs_np = final_probs.squeeze(0).detach().cpu().numpy()  # [len, 4]
+            # Build sampled exon sequences
+            sampled_exons = []
+            for s in range(sample_n):
+                bases = []
+                for i in range(len(intron_context.exon_positions)):
+                    # exon positions correspond to indices in main; but final_probs is exon-only in this implementation
+                    p = final_probs_np[i]
+                    # numerical safety
+                    p = _np.maximum(p, 1e-9)
+                    p = p / p.sum()
+                    base_idx = _np.random.choice(4, p=p)
+                    base = 'ACGU'[base_idx]
+                    bases.append(base)
+                exon_rna = ''.join(bases)
+                sampled_exons.append(exon_rna)
+
+            # Write multi-FASTA containing only main region sequences (with intron lowercase) in DNA tokens
+            from pathlib import Path as _Path
+            base = _Path(str(output_path))
+            sampled_fa = base.with_suffix('.samples.fa')
+            sampled_main_dna_list = []
+            with open(sampled_fa, 'w') as sf:
+                for idx, exon_rna in enumerate(sampled_exons, start=1):
+                    # Rebuild mixed-case main (introns preserved lowercase)
+                    # Use intron_context.main_sequence as template, substitute exon positions
+                    main_chars = list(intron_context.main_sequence)
+                    for e_i, pos in enumerate(intron_context.exon_positions):
+                        main_chars[pos] = exon_rna[e_i]
+                    rebuilt_main_rna = ''.join(main_chars)  # mixed case RNA
+                    rebuilt_main_dna = _rna_to_dna(rebuilt_main_rna)
+                    sampled_main_dna_list.append(rebuilt_main_dna)
+                    header = f"main_seq_{idx}"
+                    sf.write(f">{header}\n")
+                    for i in range(0, len(rebuilt_main_dna), 60):
+                        sf.write(rebuilt_main_dna[i:i+60] + "\n")
+            print(f"Saved {sample_n} sampled main sequences to: {sampled_fa}")
+
+            # Compute and save JSON with mutations and EFE/BPP deltas for best design
+            try:
+                import json as _json
+                json_path = base.with_suffix('.summary.json')
+                summary = {
+                    'baseline': {
+                        'efe_loss': baseline_efe_loss,
+                        'boundary_sum': baseline_boundary_loss,
+                        'raw_efe_values': baseline_raw_efes,
+                    },
+                    'best': {
+                        'efe_loss': best_metrics['efe_loss'],
+                        'boundary_sum': best_metrics['boundary'],
+                        'raw_efe_values': best_metrics['raw_efe'],
+                    },
+                    'delta': {
+                        'efe_loss': best_metrics['efe_loss'] - baseline_efe_loss,
+                        'boundary_sum': best_metrics['boundary'] - baseline_boundary_loss,
+                        'raw_efe_avg': ((sum(best_metrics['raw_efe']) / len(best_metrics['raw_efe'])) if best_metrics['raw_efe'] else 0.0) - ((sum(baseline_raw_efes) / len(baseline_raw_efes)) if baseline_raw_efes else 0.0)
+                    },
+                    'mutations': [
+                        {
+                            'design_index': m['design_index'],
+                            'main_index': m['main_index'],
+                            'full_index': m['full_index'],
+                            'codon_index': m['codon_index'],
+                            'pos_in_codon': m['pos_in_codon'],
+                            'ref_dna': _rna_to_dna(m['ref_rna']),
+                            'alt_dna': _rna_to_dna(m['alt_rna'])
+                        } for m in mutations
+                    ],
+                    'samples': [
+                        {
+                            'header': f"main_seq_{i+1}",
+                            'main_dna': sampled_main_dna_list[i]
+                        } for i in range(len(sampled_main_dna_list))
+                    ],
+                    'loss_plot': loss_png_path
+                }
+                with open(json_path, 'w') as jf:
+                    _json.dump(summary, jf, indent=2)
+                print(f"Saved JSON summary to: {json_path}")
+            except Exception as e:
+                print(f"Warning: failed to save JSON summary: {e}")
 
 
 def run_accessibility_optimization(args):
@@ -808,6 +954,13 @@ Note: First run will prompt to auto-install DeepRaccess if not found
         '--structure-output',
         type=str,
         help='Optional path to save final UTR/main multi-FASTA with optimized exons'
+    )
+
+    parser.add_argument(
+        '--sample-count',
+        type=int,
+        default=0,
+        help='Number of sequences to sample from final probability profile (intron mode only)'
     )
 
     parser.add_argument(
