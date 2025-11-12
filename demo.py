@@ -55,47 +55,6 @@ def apply_config_overrides(args):
 
     return args
 
-def ensure_deepraccess_available():
-    """Ensure DeepRaccess dependency exists before running accessibility mode."""
-    project_root = Path(__file__).parent
-    possible_dirs = [
-        project_root / "DeepRaccess",
-        project_root / "scripts" / "DeepRaccess"
-    ]
-
-    for dir_path in possible_dirs:
-        if dir_path.exists():
-            return
-
-    print("\n" + "="*70)
-    print("⚠️  DeepRaccess Not Found")
-    print("="*70)
-    print("\nDeepRaccess is required for RNA accessibility prediction.")
-    print("\nAttempting automatic setup...")
-    print("This will take ~30 seconds with internet connection.")
-    print("="*70 + "\n")
-
-    import subprocess
-    setup_script = project_root / "scripts" / "setup_deepraccess.sh"
-    if setup_script.exists():
-        try:
-            subprocess.run(
-                ["bash", str(setup_script), "-y"],
-                check=True,
-                capture_output=False
-            )
-            print("\n✅ Setup complete! Please re-run demo.py\n")
-            sys.exit(0)
-        except subprocess.CalledProcessError as e:
-            print(f"\n❌ Setup failed with error code {e.returncode}")
-            print("Please try manual setup:")
-            print("  bash scripts/setup_deepraccess.sh")
-            sys.exit(1)
-    else:
-        print("\n❌ setup_deepraccess.sh not found at scripts/setup_deepraccess.sh")
-        print("\nManual setup:")
-        print("  git clone https://github.com/hmdlab/DeepRaccess.git")
-        sys.exit(1)
 
 from id3.constraints.lagrangian import LagrangianConstraint
 from id3.constraints.amino_matching import AminoMatchingSoftmax
@@ -301,6 +260,29 @@ def run_intron_structural_optimization(args):
 
     final_full = intron_context.build_full_sequence(best_seq, uppercase=True)
 
+    # Compute mutation list between original exon and optimized exon (RNA space)
+    original_exon = intron_context.get_exon_sequence()
+    mutations = []
+    if len(original_exon) == len(best_seq):
+        utr5_len = len(intron_context.utr5)
+        for i, (ref_base, alt_base) in enumerate(zip(original_exon, best_seq)):
+            if ref_base != alt_base:
+                main_index = intron_context.exon_positions[i]  # 0-based in main
+                full_index = utr5_len + main_index             # 0-based in full (UTR5 + main + UTR3)
+                codon_index = i // 3 + 1
+                pos_in_codon = i % 3
+                mutations.append({
+                    'design_index': i + 1,  # 1-based within exon-only design
+                    'main_index': main_index,
+                    'full_index': full_index,
+                    'codon_index': codon_index,
+                    'pos_in_codon': pos_in_codon,
+                    'ref_rna': ref_base,
+                    'alt_rna': alt_base,
+                })
+    else:
+        print("Warning: exon length mismatch when computing mutations; skipping list.")
+
     print("\n" + "-"*70)
     print("Optimization Summary")
     print("-"*70)
@@ -318,6 +300,26 @@ def run_intron_structural_optimization(args):
     final_full_dna = _rna_to_dna(final_full)
     print(f"Best exon sequence: {best_exon_dna[:60]}{'...' if len(best_exon_dna) > 60 else ''}")
     print(f"Full pre-mRNA (with UTRs): {final_full_dna[:60]}{'...' if len(final_full_dna) > 60 else ''}")
+
+    # Print mutation list summary (DNA view)
+    if mutations:
+        print("\n" + "-"*70)
+        print("Mutations (exon design, DNA view)")
+        print("-"*70)
+        print(f"Total changes: {len(mutations)} (of {len(original_exon)})")
+        # Show up to first 20 mutations for readability
+        preview = mutations[:20]
+        for m in preview:
+            ref_dna = _rna_to_dna(m['ref_rna'])
+            alt_dna = _rna_to_dna(m['alt_rna'])
+            print(
+                f"pos(exon) {m['design_index']:>4d} | codon {m['codon_index']:>4d}.{m['pos_in_codon']} | "
+                f"main_idx {m['main_index']:>4d} | full_idx {m['full_index']:>4d} : {ref_dna} -> {alt_dna}"
+            )
+        if len(mutations) > len(preview):
+            print(f"... and {len(mutations) - len(preview)} more changes")
+    else:
+        print("\nNo base changes in exon design (identical to original).")
     if args.structure_output:
         main_with_case = intron_context.rebuild_main_with_exons(best_seq)
         # Convert all sequences to DNA for saved output in intron mode
@@ -332,11 +334,26 @@ def run_intron_structural_optimization(args):
         )
         print(f"\nSaved multi-FASTA with optimized exon design to: {output_path}")
 
+        # Also save mutation list next to the FASTA as TSV
+        try:
+            from pathlib import Path as _Path
+            mut_path = _Path(str(output_path).rsplit('.', 1)[0] + ".mutations.tsv")
+            with open(mut_path, 'w') as mf:
+                mf.write("design_index\tmain_index\tfull_index\tcodon_index\tpos_in_codon\tref_dna\talt_dna\n")
+                for m in mutations:
+                    ref_dna = _rna_to_dna(m['ref_rna'])
+                    alt_dna = _rna_to_dna(m['alt_rna'])
+                    mf.write(
+                        f"{m['design_index']}\t{m['main_index']}\t{m['full_index']}\t{m['codon_index']}\t{m['pos_in_codon']}\t{ref_dna}\t{alt_dna}\n"
+                    )
+            print(f"Saved mutation list to: {mut_path}")
+        except Exception as e:
+            print(f"Warning: failed to save mutation list TSV: {e}")
+
 
 def run_accessibility_optimization(args):
     """Run ID3 optimization with accessibility prediction"""
 
-    ensure_deepraccess_available()
     from id3.utils.deepraccess_wrapper import DeepRaccessID3Wrapper
 
     print("\n" + "="*70)
