@@ -34,8 +34,12 @@ This repository contains the complete implementation of the ID3 (Iterative Deep 
 git clone https://github.com/Li-Hongmin/ID3.git
 cd ID3
 
-# Install dependencies
-pip install -r requirements.txt
+# Initialize submodules (DeepRaccess etc.)
+git submodule update --init --recursive
+
+# Install dependencies via the Python package manager (preferred)
+uv sync
+. .venv/bin/activate
 
 # Run demo - DeepRaccess will be set up automatically
 bash run_demo.sh
