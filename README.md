@@ -241,6 +241,22 @@ Use `--efe-weight`, `--boundary-weight`, `--window-upstream/downstream`, and
 `IntronAwaredExonDesignerContext`, and `_docs/intron_awared_exon_designer_refactor_plan.md`
 describes the requirements/architecture in detail.
 
+### Configuration-first recommendation
+
+Every CLI flag can be moved into a YAML config (`--config <path>`). For structural runs the
+example `id3/config/intron_design_example.yaml` already captures the recommended window sizes,
+loss weights, and sampling flags. When you launch the IntronAwaredExonDesigner flow, prefer to
+edit that config or create a dedicated one so that experiments are reproducible and easier to
+share.
+
+### Recording your virtual environment
+```bash
+uv --version
+# brew install uv # if uv is not installed in your system, please execute this line.
+uv sync
+```
+
+
 ## Demo Examples
 
 ### Example 1: Basic Access-Only
