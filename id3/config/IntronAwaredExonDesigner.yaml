@@ -26,4 +26,4 @@ window_downstream: 30 # intron 下流の 最大 何塩基分の exon 領域を�
 boundary_flank: 3 # intron の 5'/3' prime それぞれの端の何塩基の塩基確率の合計 \sum_{i = 0, 1, 2} p(5'end + i) p(3'end - i| stem) を小さくするか
 
 # Output
-structure_output: outputs/chimera_optimized.fa
+output_file: outputs/chimera_optimized_multi.fa
