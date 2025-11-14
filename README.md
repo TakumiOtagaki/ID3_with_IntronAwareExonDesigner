@@ -222,6 +222,25 @@ Constraint → Soft Probabilities → DeepRaccess → Accessibility Loss → Bac
 - **sto_soft**: Stochastic sampling with soft constraints
 - **sto_hard**: Stochastic sampling with hard constraints
 
+## IntronAwaredExonDesigner structural workflow
+
+The `demo.py` CLI now doubles as the IntronAwaredExonDesigner driver. Add `--structure-fasta`
+to redesign exon-only regions (uppercase) while keeping introns fixed (lowercase). The flow
+reuses the same constraints, hyper-parameters, and optimizer, but computes ViennaRNA-based
+window (-60/+30 around each intron) `-EFE` losses plus boundary BPP penalties so splice sites
+stay unpaired.
+
+Use `--efe-weight`, `--boundary-weight`, `--window-upstream/downstream`, and
+`--boundary-flank` to tune the structural pressure. Saved outputs include:
+
+- optimized UTR/main multi-FASTA (`--structure-output`)
+- TSV mutation lists and loss-curve PNGs
+- optional sampled exon sequences and summary JSON (`--sample-count`)
+
+`id3/apps/exon_driven_structural.py` handles this workflow through
+`IntronAwaredExonDesignerContext`, and `_docs/intron_awared_exon_designer_refactor_plan.md`
+describes the requirements/architecture in detail.
+
 ## Demo Examples
 
 ### Example 1: Basic Access-Only
