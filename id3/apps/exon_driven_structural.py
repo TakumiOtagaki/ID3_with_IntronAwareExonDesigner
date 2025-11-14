@@ -51,8 +51,8 @@ def _build_candidate_entry(label: str, exon_sequence: str, context: IntronAwared
 
 def _format_candidate_header(prefix: str, label: str, metrics: Dict[str, float]) -> str:
     return (
-        f"{prefix} {label} | efe={metrics['efe_loss']:.2f} | "
-        f"boundary={metrics['boundary']:.2f} | raw_avg={metrics['raw_efe_avg']:.2f}"
+        f"{prefix} {label} | efe={metrics['raw_efe_avg']:.2f} | "
+        f"boundary={metrics['boundary']:.2f}"
     )
 
 
@@ -367,68 +367,22 @@ def run_intron_awared_exon_structural_optimization(args):
         _write_design_multifasta(output_path, utr5_dna, utr3_dna, candidates)
         print(f"\nSaved multi-FASTA with optimized and sampled sequences to: {output_path}")
 
-        try:
-            mut_path = Path(str(output_path)).with_suffix(".mutations.tsv")
-            with open(mut_path, 'w') as mf:
-                mf.write("design_index\tmain_index\tfull_index\tcodon_index\tpos_in_codon\tref_dna\talt_dna\n")
-                for m in mutations:
-                    ref_dna = rna_to_dna(m['ref_rna'])
-                    alt_dna = rna_to_dna(m['alt_rna'])
-                    mf.write(
-                        f"{m['design_index']}\t{m['main_index']}\t{m['full_index']}\t{m['codon_index']}\t"
-                        f"{m['pos_in_codon']}\t{ref_dna}\t{alt_dna}\n"
-                    )
-            print(f"Saved mutation list to: {mut_path}")
-        except Exception as exc:
-            print(f"Warning: failed to save mutation list TSV: {exc}")
+        # Print table of candidate metrics
+        df_rows = []
+        for candidate in candidates:
+            df_rows.append({
+                'label': candidate['label'],
+                'boundary_bpp': candidate['metrics']['boundary'],
+                'efe': candidate['metrics']['raw_efe_avg']
+            })
 
         try:
-            summary = {
-                'baseline': {
-                    'efe_loss': baseline_efe_loss,
-                    'boundary_sum': baseline_boundary_loss,
-                    'raw_efe_values': baseline_raw_efes,
-                },
-                'best': {
-                    'efe_loss': best_metrics['efe_loss'],
-                    'boundary_sum': best_metrics['boundary'],
-                    'raw_efe_values': best_metrics['raw_efe'],
-                },
-                'delta': {
-                    'efe_loss': best_metrics['efe_loss'] - baseline_efe_loss,
-                    'boundary_sum': best_metrics['boundary'] - baseline_boundary_loss,
-                    'raw_efe_avg': best_metrics['raw_efe_avg'] - (
-                        sum(baseline_raw_efes) / len(baseline_raw_efes)
-                        if baseline_raw_efes else 0.0
-                    )
-                },
-                'mutations': [
-                    {
-                        'design_index': m['design_index'],
-                        'main_index': m['main_index'],
-                        'full_index': m['full_index'],
-                        'codon_index': m['codon_index'],
-                        'pos_in_codon': m['pos_in_codon'],
-                        'ref_dna': rna_to_dna(m['ref_rna']),
-                        'alt_dna': rna_to_dna(m['alt_rna'])
-                    } for m in mutations
-                ],
-                'samples': [
-                    {
-                        'label': candidate['label'],
-                        'main_dna': rna_to_dna(candidate['main_rna']),
-                        'efe_loss': candidate['metrics']['efe_loss'],
-                        'boundary_sum': candidate['metrics']['boundary'],
-                        'raw_efe_avg': candidate['metrics']['raw_efe_avg']
-                    } for candidate in sampled_candidates
-                ],
-                'loss_plot': loss_png_path,
-                'multi_fasta': str(output_path)
-            }
-
-            json_path = Path(str(output_path)).with_suffix('.summary.json')
-            with open(json_path, 'w') as jf:
-                json.dump(summary, jf, indent=2)
-            print(f"Saved structural summary to: {json_path}")
-        except Exception as exc:
-            print(f"Warning: failed to save structural summary: {exc}")
+            import pandas as _pd
+            df = _pd.DataFrame(df_rows)
+            df = df.set_index('label')
+            print("\nStructural metrics (boundary BPP / window -EFE):")
+            print(df)
+        except ImportError:
+            print("\nStructural metrics (boundary BPP / window -EFE):")
+            for row in df_rows:
+                print(f"- {row['label']}: boundary={row['boundary_bpp']:.2f}, efe={row['efe_loss']:.2f}")
