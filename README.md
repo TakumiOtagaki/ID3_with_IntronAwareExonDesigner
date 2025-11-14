@@ -257,6 +257,13 @@ uv sync
 ```
 
 
+### Demo usage of IntronAwaredExonDesigner
+```bash
+. .venv/bin/activate
+uv run python demo.py --config "id3/config/IntronAwaredExonDesigner.yaml"
+```
+
+
 ## Demo Examples
 
 ### Example 1: Basic Access-Only
