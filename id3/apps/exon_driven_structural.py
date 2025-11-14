@@ -239,6 +239,14 @@ def run_intron_awared_exon_structural_optimization(args):
     )
     best_metrics = best_candidate['metrics']
     final_full = best_candidate['full_sequence']
+    baseline_candidate = _build_candidate_entry(
+        'baseline',
+        original_exon,
+        context,
+        vienna,
+        window_ranges,
+        boundary_indices
+    )
     final_vis = constraint.forward(alpha=0.0, beta=0.0)
     final_probs = final_vis['rna_sequence']
     if final_probs.dim() == 2:
@@ -372,7 +380,11 @@ def run_intron_awared_exon_structural_optimization(args):
         print(f"\nSaved multi-FASTA with optimized and sampled sequences to: {output_path}")
 
         # Print table of candidate metrics
-        df_rows = []
+        df_rows = [{
+            'label': baseline_candidate['label'],
+            'boundary_bpp': baseline_candidate['metrics']['boundary'],
+            'efe': baseline_candidate['metrics']['raw_efe_avg']
+        }]
         for candidate in candidates:
             df_rows.append({
                 'label': candidate['label'],
