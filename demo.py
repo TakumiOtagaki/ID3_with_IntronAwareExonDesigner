@@ -95,7 +95,12 @@ Examples:
     parser.add_argument('--window-upstream', type=int, default=60, help='Upstream window size for EFE')
     parser.add_argument('--window-downstream', type=int, default=30, help='Downstream window size for EFE')
     parser.add_argument('--boundary-flank', type=int, default=3, help='Flank size for boundary BPP loss')
-    parser.add_argument('--structure-output', type=str, help='Path to save optimized UTR/main multi-FASTA')
+    parser.add_argument(
+        '--output-file', '--output_file',
+        dest='output_file',
+        type=str,
+        help='Path to save optimized UTR/main multi-FASTA (IntronAwaredExonDesigner flow)'
+    )
     parser.add_argument('--sample-count', type=int, default=0, help='Number of sampled exon sequences to save')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Computation device')
     parser.add_argument('--deepraccess-model', type=str, help='Path to DeepRaccess model (optional)')
