@@ -15,7 +15,7 @@ This repository contains the complete implementation of the ID3 (Iterative Deep 
 - **12 Optimization Variants**: 3 constraint mechanisms × 4 optimization modes
   - **Constraints**: Codon Profile Constraint, Amino Matching Softmax, Lagrangian Multiplier
   - **Modes**: Deterministic/Stochastic × Soft/Hard
-- **DeepRaccess Integration**: RNA accessibility prediction for ribosome binding
+- **DeepRaccess Integration**: RNA accessibility prediction for ribosome binding (now supplied via the `DeepRaccess` submodule so `run_demo.sh` only verifies its presence)
 - **CAI Optimization**: Codon Adaptation Index for translation efficiency
 - **GPU Support**: CUDA acceleration for faster optimization
 
@@ -64,7 +64,6 @@ bash run_demo.sh P04637
 ```
 
 The demo automatically:
-- ✅ Checks and installs DeepRaccess if needed
 - ✅ Runs 1000-iteration mRNA optimization with Amino Matching Softmax constraint
 - ✅ Generates publication-quality evolution figures
 - ✅ Saves all results to `examples/` directory
@@ -194,6 +193,15 @@ result = constraint_cai.forward(alpha=0.5, beta=0.5)
 rna_seq = result['discrete_sequence']
 cai_value = result['cai_metadata']['final_cai']
 ```
+
+### IntronAwaredExonDesigner structural workflow
+
+You can also drive the IntronAwaredExonDesigner structural flow using the same CLI: pass `--structure-fasta`
+with a multi-FASTA that contains lowercase introns and uppercase exons, and tune `--efe-weight`, `--boundary-weight`,
+`--window-upstream/downstream`, and `--boundary-flank` to apply ViennaRNA-based penalties to every intron window.
+The output is a single multi-FASTA that enumerates the baseline, the best design, and any sampled exon variants with
+headers showing the averaged window `-EFE` across all introns plus the summed boundary BPP, and the CLI prints a
+compact pandas-style table to help compare these candidates.
 
 ## Constraint Mechanisms
 
