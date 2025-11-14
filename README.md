@@ -247,6 +247,11 @@ loss weights, and sampling flags. When you launch the IntronAwaredExonDesigner f
 edit that config or create a dedicated one so that experiments are reproducible and easier to
 share.
 
+> **Priority reminder:** we parse CLI arguments first and then load any specified config, so values
+> from `--config` override CLI flags. In your example the `--output_file` passed on the command line
+> would be replaced by whatever `output_file` the YAML defines. To keep a CLI override, either
+> leave that key out of the config or edit the config itself before running.
+
 ### Recording your virtual environment
 ```bash
 uv --version
